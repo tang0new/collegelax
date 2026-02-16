@@ -70,11 +70,19 @@ function resolveUpstashCredentials(): { url: string; token: string } | null {
     return { url: process.env.REDIS_URL, token: process.env.REDIS_TOKEN };
   }
 
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    return {
+      url: process.env.KV_REST_API_URL,
+      token: process.env.KV_REST_API_TOKEN
+    };
+  }
+
   if (process.env.REDIS_URL && !process.env.REDIS_TOKEN) {
     try {
       const parsed = new URL(process.env.REDIS_URL);
       const token = parsed.searchParams.get('token') || parsed.password;
-      if (token) {
+      const isHttp = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+      if (token && isHttp) {
         parsed.searchParams.delete('token');
         parsed.password = '';
         parsed.username = '';

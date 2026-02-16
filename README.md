@@ -109,6 +109,8 @@ npm run scheduler
 
 - `REDIS_URL`: Upstash REST URL
 - `REDIS_TOKEN`: Upstash REST token
+- `KV_REST_API_URL`: Vercel KV REST URL (auto-provided, supported)
+- `KV_REST_API_TOKEN`: Vercel KV REST token (auto-provided, supported)
 - `ADMIN_PASSWORD`: password for `/admin/login`
 - `ODDS_API_KEY`: key for The Odds API
 - `CRON_SECRET`: optional bearer secret for cron endpoint calls
