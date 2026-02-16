@@ -1,5 +1,5 @@
-import puppeteer from 'puppeteer';
 import robotsParser from 'robots-parser';
+import { launchBrowser } from '@/lib/browser';
 import type { RankingEntry, RankingsPayload } from '@/lib/types';
 import { normalizeWhitespace, safeGameId, sleep } from '@/lib/utils';
 
@@ -42,10 +42,7 @@ function normalizeRow(rankText: string, team: string, record: string, pointsVote
 async function scrapeSingleRanking(url: string): Promise<RankingEntry[]> {
   await ensureAllowed(url);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();

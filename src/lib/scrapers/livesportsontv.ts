@@ -1,5 +1,5 @@
-import puppeteer from 'puppeteer';
 import robotsParser from 'robots-parser';
+import { launchBrowser } from '@/lib/browser';
 import type { Game, GameDetail, StreamingPlatform } from '@/lib/types';
 import {
   detectPlatform,
@@ -113,10 +113,7 @@ function normalizeRawGame(raw: RawGame): Game {
 export async function scrapeGamesSchedule(maxPaginationClicks = 8): Promise<Game[]> {
   await ensureAllowed(SCHEDULE_URL);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();
@@ -223,10 +220,7 @@ export async function scrapeGameDetail(detailUrl: string): Promise<GameDetail> {
   const absoluteUrl = toAbsoluteUrl(detailUrl, BASE_URL);
   await ensureAllowed(absoluteUrl);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();

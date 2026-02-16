@@ -9,6 +9,7 @@ Full-stack Astro application for college lacrosse schedules, streaming discovery
 - Backend: Astro API routes (Node runtime)
 - Cache/Analytics: Upstash Redis
 - Scraping: Puppeteer with robots.txt checks + retry/backoff
+- Runtime browser: `@sparticuz/chromium` + `puppeteer-core` on Vercel serverless
 - Scheduling: node-cron (local) + Vercel Cron (production)
 
 ## Features

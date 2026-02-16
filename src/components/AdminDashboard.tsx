@@ -54,8 +54,11 @@ export default function AdminDashboard() {
 
   async function trigger(path: string, label: string) {
     setMessage(`${label} in progress...`);
-    const response = await fetch(path, { method: 'POST' });
-    const payload = await response.json();
+    const response = await fetch(`${path}?manual=1&t=${Date.now()}`, { method: 'GET' });
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json')
+      ? await response.json()
+      : { error: await response.text() };
     if (!response.ok) {
       setMessage(payload.error || `${label} failed`);
       return;
