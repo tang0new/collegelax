@@ -2,19 +2,14 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "src/pages/api/**/*.ts": {
-      "maxDuration": 60
-    }
-  },
   "crons": [
     {
       "path": "/api/scrape-games",
-      "schedule": "0 */12 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/scrape-rankings",
-      "schedule": "0 0 * * *"
+      "schedule": "30 0 * * *"
     }
   ]
 }
