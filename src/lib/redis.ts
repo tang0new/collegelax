@@ -67,7 +67,15 @@ const memoryStore = new InMemoryStore();
 
 function resolveUpstashCredentials(): { url: string; token: string } | null {
   if (process.env.REDIS_URL && process.env.REDIS_TOKEN) {
-    return { url: process.env.REDIS_URL, token: process.env.REDIS_TOKEN };
+    try {
+      const parsed = new URL(process.env.REDIS_URL);
+      const isHttp = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+      if (isHttp) {
+        return { url: process.env.REDIS_URL, token: process.env.REDIS_TOKEN };
+      }
+    } catch {
+      // Ignore invalid REDIS_URL format and continue fallback resolution.
+    }
   }
 
   if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
