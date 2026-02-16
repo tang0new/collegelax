@@ -34,12 +34,19 @@ if (isAdminAuthenticated(Astro)) {
 
     form?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const formData = new FormData(form);
+      const passwordInput = form.querySelector('input[name=\"password\"]');
+      const password = passwordInput?.value || '';
       const response = await fetch('/api/admin/login', {
         method: 'POST',
-        body: formData
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ password })
       });
-      const payload = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const payload = contentType.includes('application/json')
+        ? await response.json()
+        : { error: await response.text() };
 
       if (!response.ok) {
         if (message) message.textContent = payload.error || 'Login failed';

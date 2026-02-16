@@ -9,8 +9,16 @@ export const POST: APIRoute = async (context) => {
     return json({ error: 'Too many attempts. Please wait.' }, 429);
   }
 
-  const formData = await context.request.formData();
-  const password = String(formData.get('password') || '');
+  const contentType = context.request.headers.get('content-type') || '';
+  let password = '';
+
+  if (contentType.includes('application/json')) {
+    const payload = (await context.request.json().catch(() => ({}))) as { password?: string };
+    password = String(payload.password || '');
+  } else {
+    const formData = await context.request.formData();
+    password = String(formData.get('password') || '');
+  }
 
   if (!verifyAdminPassword(password)) {
     return json({ error: 'Invalid password' }, 401);
