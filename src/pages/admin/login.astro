@@ -1,0 +1,52 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import { isAdminAuthenticated } from '@/lib/admin-auth';
+
+if (isAdminAuthenticated(Astro)) {
+  return Astro.redirect('/admin/dashboard');
+}
+---
+
+<Layout title="Admin Login" canonical="https://collegelacrosseschedule.com/admin/login">
+  <section class="mx-auto max-w-md rounded-xl bg-white p-6 shadow-card">
+    <h1 class="text-2xl font-extrabold text-navy">Admin Login</h1>
+    <p class="mt-2 text-sm text-navy/70">Enter your admin password to access scraping controls and analytics.</p>
+
+    <form id="admin-login-form" class="mt-5 space-y-3">
+      <label class="block text-sm font-semibold text-navy">
+        Password
+        <input
+          type="password"
+          name="password"
+          required
+          class="mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+          autocomplete="current-password"
+        />
+      </label>
+      <button type="submit" class="w-full rounded-md bg-navy px-4 py-2 text-sm font-bold text-white">Sign In</button>
+      <p id="login-message" class="text-sm text-red-600"></p>
+    </form>
+  </section>
+
+  <script is:inline>
+    const form = document.getElementById('admin-login-form');
+    const message = document.getElementById('login-message');
+
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        body: formData
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        if (message) message.textContent = payload.error || 'Login failed';
+        return;
+      }
+
+      window.location.assign('/admin/dashboard');
+    });
+  </script>
+</Layout>

@@ -1,0 +1,36 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import ScheduleBoard from '@/components/ScheduleBoard';
+---
+
+<Layout
+  title="College Lacrosse Schedule & Streaming Guide"
+  description="Never miss a college lacrosse game. Browse full upcoming schedules, streaming platforms, rankings, and odds."
+  canonical="https://collegelacrosseschedule.com/"
+>
+  <section class="rounded-2xl bg-navy px-6 py-10 text-white shadow-card sm:px-10">
+    <p class="text-xs font-bold uppercase tracking-[0.24em] text-accent">College Lacrosse TV Guide</p>
+    <h1 class="mt-3 text-3xl font-extrabold sm:text-4xl">Never Miss a College Lacrosse Game</h1>
+    <p class="mt-3 max-w-3xl text-sm text-white/80 sm:text-base">
+      Live schedules, streaming options, rankings, and game odds in one place. Updated automatically every 12 hours.
+    </p>
+  </section>
+
+  <section class="mt-8 grid gap-6 lg:grid-cols-[1fr_300px]">
+    <div>
+      <ScheduleBoard client:load />
+    </div>
+    <aside class="hidden lg:block">
+      <div class="sticky top-28 space-y-4">
+        <div class="ad-slot h-[250px] w-[300px] rounded-md">
+          Sidebar Ad Slot 300x250
+          <!-- Insert ad network code here -->
+        </div>
+        <div class="ad-slot h-[250px] w-[300px] rounded-md">
+          Sportsbook Affiliate Ad 300x250
+          <!-- Insert sportsbook affiliate ad code here -->
+        </div>
+      </div>
+    </aside>
+  </section>
+</Layout>

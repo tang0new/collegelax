@@ -1,0 +1,60 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import { detectPlatform, sanitizeExternalUrl } from '@/lib/utils';
+
+const { platform, gameId } = Astro.params;
+const target = sanitizeExternalUrl(Astro.url.searchParams.get('to') || '');
+const matchup = Astro.url.searchParams.get('matchup') || 'College Lacrosse Matchup';
+
+if (!platform || !gameId || !target) {
+  return new Response('Invalid watch link', { status: 404 });
+}
+
+const platformData = detectPlatform(platform);
+---
+
+<Layout
+  title={`Redirecting to ${platformData.name}`}
+  description={`Redirecting to ${platformData.name} for ${matchup}.`}
+  canonical={`https://collegelacrosseschedule.com/watch/${platform}/${gameId}`}
+>
+  <section class="mx-auto max-w-xl rounded-2xl bg-white p-8 text-center shadow-card">
+    <img src={platformData.logo} alt={platformData.name} class="mx-auto h-16 w-16 rounded-lg bg-slate-100 p-2" />
+    <h1 class="mt-4 text-2xl font-extrabold text-navy">Redirecting you to {platformData.name}...</h1>
+    <p class="mt-2 text-sm text-navy/70">{matchup}</p>
+    <p class="mt-4 text-sm text-navy/80">
+      You will be redirected in <span id="countdown" class="font-mono font-bold">3</span> seconds.
+    </p>
+    <a
+      href={target}
+      target="_self"
+      rel="noopener noreferrer"
+      class="mt-6 inline-flex rounded-md bg-accent px-5 py-2 text-sm font-bold text-navy"
+    >
+      Continue now
+    </a>
+  </section>
+
+  <script
+    is:inline
+    define:vars={{ gameId, platform, target }}
+  >
+    const countdownNode = document.getElementById('countdown');
+    let seconds = 3;
+
+    fetch('/api/track-click', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ gameId, platform, targetUrl: target })
+    }).catch(() => undefined);
+
+    const timer = window.setInterval(() => {
+      seconds -= 1;
+      if (countdownNode) countdownNode.textContent = String(Math.max(seconds, 0));
+      if (seconds <= 0) {
+        window.clearInterval(timer);
+        window.location.replace(target);
+      }
+    }, 1000);
+  </script>
+</Layout>

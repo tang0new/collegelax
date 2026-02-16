@@ -1,0 +1,23 @@
+---
+import Layout from '@/layouts/Layout.astro';
+---
+
+<Layout
+  title="About CollegeLacrosseSchedule.com"
+  description="Learn how CollegeLacrosseSchedule.com aggregates game schedules, streaming links, and rankings for NCAA lacrosse."
+  canonical="https://collegelacrosseschedule.com/about"
+>
+  <section class="rounded-xl bg-white p-6 shadow-card">
+    <h1 class="text-3xl font-extrabold text-navy">About</h1>
+    <p class="mt-3 text-sm text-navy/80">
+      CollegeLacrosseSchedule.com is a dedicated schedule and streaming hub for NCAA lacrosse fans. We aggregate verified
+      broadcast information, rankings, and odds so you can quickly find where to watch each matchup.
+    </p>
+    <ul class="mt-4 list-disc space-y-2 pl-6 text-sm text-navy/80">
+      <li>Schedules are scraped every 12 hours with robots.txt compliance and fallback caching.</li>
+      <li>Rankings are scraped every 24 hours from NCAA ranking sources.</li>
+      <li>All outbound streaming links route through our watch tracking page before redirecting.</li>
+      <li>Odds are provided for entertainment only where available.</li>
+    </ul>
+  </section>
+</Layout>

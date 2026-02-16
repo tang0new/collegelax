@@ -1,0 +1,35 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import RankingsTable from '@/components/RankingsTable';
+import { getCachedRankings, scrapeRankingsNow } from '@/api/scrape-rankings';
+
+const cached = await getCachedRankings();
+let mens = cached.mens;
+let womens = cached.womens;
+let updatedAt = cached.lastUpdated;
+
+if (!mens.length && !womens.length) {
+  const fresh = await scrapeRankingsNow();
+  mens = fresh.rankings.mens;
+  womens = fresh.rankings.womens;
+  updatedAt = fresh.rankings.updatedAt;
+}
+---
+
+<Layout
+  title="College Lacrosse Rankings | Top 25 Men's & Women's"
+  description="NCAA men's and women's college lacrosse Top 25 rankings with records, points/votes, and movement indicators."
+  canonical="https://collegelacrosseschedule.com/rankings"
+>
+  <section class="rounded-2xl bg-white p-6 shadow-card">
+    <h1 class="text-3xl font-extrabold text-navy">College Lacrosse Rankings</h1>
+    <p class="mt-2 text-sm text-navy/70">
+      Last updated: {updatedAt ? new Date(updatedAt).toLocaleString() : 'Pending first scrape'}
+    </p>
+  </section>
+
+  <section class="mt-6 grid gap-6">
+    <RankingsTable title="Men's Top 25" rows={mens} />
+    <RankingsTable title="Women's Top 25" rows={womens} />
+  </section>
+</Layout>
