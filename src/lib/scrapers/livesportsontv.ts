@@ -1,10 +1,9 @@
 import robotsParser from 'robots-parser';
-import { launchBrowser } from '@/lib/browser';
 import type { Game, GameDetail, StreamingPlatform } from '@/lib/types';
 import {
   detectPlatform,
   extractAffiliateTarget,
-  isLikelyMatchUrl,
+  fetchWithRetry,
   normalizeWhitespace,
   parseTeams,
   safeGameId,
@@ -17,21 +16,31 @@ const BASE_URL = 'https://www.livesportsontv.com';
 const SCHEDULE_URL = `${BASE_URL}/league/college-lacrosse`;
 const USER_AGENT = 'CollegeLacrosseScheduleBot/1.0 (+https://collegelacrosseschedule.com)';
 const REQUEST_DELAY_MS = 900;
+const NEXT_FLIGHT_PATTERN = /self\.__next_f\.push\((\[[\s\S]*?\])\)<\/script>/g;
 
 let robotsCache: { fetchedAt: number; parser: ReturnType<typeof robotsParser> } | null = null;
 
-interface RawGame {
-  detailUrl: string;
-  title: string;
-  dateText: string;
-  timeText: string;
-  timeIso: string;
-  platforms: string[];
+interface SourceChannel {
+  id?: number;
+  name?: string;
+  shortname?: string;
+  url?: string | null;
 }
 
-interface RawWatchOption {
-  name: string;
-  url: string;
+interface SourceDeepLink {
+  channel_id?: number;
+  deep_link?: string;
+}
+
+interface SourceFixture {
+  fixture_id: number;
+  fixture_slug?: string;
+  title?: string;
+  date?: string;
+  home_team?: string;
+  visiting_team?: string;
+  channels?: SourceChannel[];
+  deep_links?: SourceDeepLink[];
 }
 
 async function getRobotsParser() {
@@ -57,18 +66,12 @@ async function ensureAllowed(url: string): Promise<void> {
   }
 }
 
-function parseStartTime(rawDate: string, rawTime: string, iso: string): Date {
-  if (iso) {
-    const date = new Date(iso);
-    if (!Number.isNaN(date.getTime())) {
-      return date;
+function parseStartTime(rawIso: string | undefined): Date {
+  if (rawIso) {
+    const parsed = new Date(rawIso);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
     }
-  }
-
-  const composed = normalizeWhitespace(`${rawDate} ${rawTime}`);
-  const parsed = new Date(composed);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed;
   }
 
   const fallback = new Date();
@@ -76,32 +79,86 @@ function parseStartTime(rawDate: string, rawTime: string, iso: string): Date {
   return fallback;
 }
 
-function normalizeRawGame(raw: RawGame): Game {
-  const detailUrl = toAbsoluteUrl(raw.detailUrl, BASE_URL);
-  const idFromUrl = detailUrl.split('/').pop() || raw.title;
-  const id = safeGameId(idFromUrl);
-  const teams = parseTeams(raw.title);
-  const startDate = parseStartTime(raw.dateText, raw.timeText, raw.timeIso);
+function extractFixtureIdFromUrl(detailUrl: string): number | null {
+  const normalized = detailUrl.split('?')[0].replace(/\/+$/, '');
+  const match = normalized.match(/-(\d+)$/) || normalized.match(/\/(\d+)$/);
+  if (!match) {
+    return null;
+  }
 
-  const uniquePlatforms = Array.from(new Set(raw.platforms.filter(Boolean)));
-  const platforms: StreamingPlatform[] = uniquePlatforms.map((name) => {
-    const detected = detectPlatform(name);
-    return {
-      name: detected.name,
+  const fixtureId = Number.parseInt(match[1], 10);
+  return Number.isFinite(fixtureId) ? fixtureId : null;
+}
+
+function getMatchPath(fixture: SourceFixture): string {
+  const safeSlug = fixture.fixture_slug || safeGameId(fixture.title || `match-${fixture.fixture_id}`);
+  return `/match/${safeSlug}-${fixture.fixture_id}`;
+}
+
+function buildMatchup(fixture: SourceFixture): string {
+  if (fixture.title) {
+    return normalizeWhitespace(fixture.title);
+  }
+
+  const away = normalizeWhitespace(fixture.visiting_team || 'TBD');
+  const home = normalizeWhitespace(fixture.home_team || 'TBD');
+  return `${away} - ${home}`;
+}
+
+function buildWatchOptions(fixture: SourceFixture, detailUrl: string): StreamingPlatform[] {
+  const channels = fixture.channels || [];
+  const deepLinks = fixture.deep_links || [];
+  const deepLinkByChannelId = new Map<number, string>();
+
+  for (const deepLink of deepLinks) {
+    if (deepLink.channel_id && deepLink.deep_link) {
+      deepLinkByChannelId.set(deepLink.channel_id, deepLink.deep_link);
+    }
+  }
+
+  const output: StreamingPlatform[] = [];
+  for (const channel of channels) {
+    const rawName = normalizeWhitespace(channel.name || channel.shortname || '');
+    if (!rawName) {
+      continue;
+    }
+
+    const affiliateCandidate =
+      (channel.id ? deepLinkByChannelId.get(channel.id) : undefined) || channel.url || detailUrl;
+    const affiliateUrl = extractAffiliateTarget(toAbsoluteUrl(affiliateCandidate, BASE_URL));
+
+    const detected = detectPlatform(rawName);
+    output.push({
+      name: detected.slug === 'other' ? rawName : detected.name,
       slug: detected.slug,
       logo: detected.logo,
-      affiliateUrl: detailUrl
-    };
-  });
+      affiliateUrl
+    });
+  }
+
+  const deduped = new Map<string, StreamingPlatform>();
+  for (const option of output) {
+    deduped.set(`${option.slug}:${option.affiliateUrl}`, option);
+  }
+
+  return Array.from(deduped.values());
+}
+
+function normalizeFixture(fixture: SourceFixture): Game {
+  const detailUrl = toAbsoluteUrl(getMatchPath(fixture), BASE_URL);
+  const gameId = safeGameId(detailUrl.split('/').pop() || `game-${fixture.fixture_id}`);
+  const matchup = buildMatchup(fixture);
+  const parsedTeams = parseTeams(matchup);
+  const startDate = parseStartTime(fixture.date);
 
   return {
-    id,
+    id: gameId,
     date: startDate.toISOString().slice(0, 10),
     timeEST: toESTLabel(startDate.toISOString()),
     startTimeISO: startDate.toISOString(),
-    homeTeam: teams.homeTeam,
-    awayTeam: teams.awayTeam,
-    platforms,
+    homeTeam: normalizeWhitespace(fixture.home_team || parsedTeams.homeTeam || 'TBD'),
+    awayTeam: normalizeWhitespace(fixture.visiting_team || parsedTeams.awayTeam || 'TBD'),
+    platforms: buildWatchOptions(fixture, detailUrl),
     detailUrl,
     league: 'College Lacrosse',
     isLive: false,
@@ -110,175 +167,148 @@ function normalizeRawGame(raw: RawGame): Game {
   };
 }
 
-export async function scrapeGamesSchedule(maxPaginationClicks = 8): Promise<Game[]> {
-  await ensureAllowed(SCHEDULE_URL);
+function extractNextFlightPayloads(html: string): string[] {
+  const payloads: string[] = [];
 
-  const browser = await launchBrowser();
+  for (const match of html.matchAll(NEXT_FLIGHT_PATTERN)) {
+    const raw = match[1];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && typeof parsed[1] === 'string') {
+        payloads.push(parsed[1]);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return payloads;
+}
+
+function extractFixturesFromPayload(payload: string): SourceFixture[] {
+  const startMarker = '"fixtures":[';
+  const endMarker = '],"standingsData"';
+
+  const start = payload.indexOf(startMarker);
+  if (start === -1) {
+    return [];
+  }
+
+  const end = payload.indexOf(endMarker, start + startMarker.length);
+  if (end === -1) {
+    return [];
+  }
+
+  const fixturesJson = `[${payload.slice(start + startMarker.length, end)}]`;
 
   try {
-    const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
-    await page.goto(SCHEDULE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await sleep(1200);
-
-    for (let i = 0; i < maxPaginationClicks; i += 1) {
-      const clicked = await page.evaluate(() => {
-        const links = Array.from(document.querySelectorAll('a, button')) as HTMLElement[];
-        const target = links.find((el) => /show\s+previous\s+events/i.test(el.textContent || ''));
-        if (!target) {
-          return false;
-        }
-        target.click();
-        return true;
-      });
-
-      if (!clicked) {
-        break;
-      }
-
-      await sleep(1500);
+    const fixtures = JSON.parse(fixturesJson);
+    if (Array.isArray(fixtures)) {
+      return fixtures.filter((item): item is SourceFixture => Boolean(item && item.fixture_id));
     }
-
-    const rawGames = await page.evaluate(() => {
-      const anchorNodes = Array.from(document.querySelectorAll('a[href*="/match/"]')) as HTMLAnchorElement[];
-      const seen = new Set<string>();
-      const rows: RawGame[] = [];
-
-      const climbForContainer = (node: HTMLElement | null): HTMLElement | null => {
-        let current = node;
-        for (let i = 0; i < 6 && current; i += 1) {
-          if (
-            current.matches('article, li, .event, .event-row, .event-item, [class*="event"], [class*="match"]')
-          ) {
-            return current;
-          }
-          current = current.parentElement;
-        }
-        return node;
-      };
-
-      for (const anchor of anchorNodes) {
-        const href = anchor.getAttribute('href') || '';
-        if (!href || seen.has(href)) {
-          continue;
-        }
-
-        const container = climbForContainer(anchor);
-        const titleText = (anchor.textContent || container?.querySelector('h2,h3,h4')?.textContent || '')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        const timeNode = container?.querySelector('time');
-        const timeIso = timeNode?.getAttribute('datetime') || '';
-        const dateText =
-          timeNode?.getAttribute('data-date') ||
-          container?.querySelector('[class*="date"]')?.textContent ||
-          '';
-        const timeText =
-          timeNode?.textContent || container?.querySelector('[class*="time"]')?.textContent || '';
-
-        const platformTexts = Array.from(
-          container?.querySelectorAll('[class*="channel"],[class*="stream"],img[alt*="ESPN"],img[alt*="Fubo"],img[alt*="Sports"],.badge') || []
-        )
-          .map((node) => (node.textContent || (node as HTMLImageElement).alt || '').replace(/\s+/g, ' ').trim())
-          .filter(Boolean);
-
-        if (!titleText) {
-          continue;
-        }
-
-        seen.add(href);
-        rows.push({
-          detailUrl: href,
-          title: titleText,
-          dateText: (dateText || '').replace(/\s+/g, ' ').trim(),
-          timeText: (timeText || '').replace(/\s+/g, ' ').trim(),
-          timeIso,
-          platforms: platformTexts
-        });
-      }
-
-      return rows;
-    });
-
-    const normalized = rawGames
-      .filter((game) => isLikelyMatchUrl(game.detailUrl))
-      .map(normalizeRawGame)
-      .sort((a, b) => new Date(a.startTimeISO).getTime() - new Date(b.startTimeISO).getTime());
-
-    return normalized;
-  } finally {
-    await browser.close();
+  } catch {
+    return [];
   }
+
+  return [];
+}
+
+function extractFixturesFromHtml(html: string): SourceFixture[] {
+  const payloads = extractNextFlightPayloads(html);
+  let bestFixtures: SourceFixture[] = [];
+
+  for (const payload of payloads) {
+    const fixtures = extractFixturesFromPayload(payload);
+    if (fixtures.length > bestFixtures.length) {
+      bestFixtures = fixtures;
+    }
+  }
+
+  if (!bestFixtures.length) {
+    throw new Error('Unable to parse fixtures from livesportsontv payload');
+  }
+
+  return bestFixtures;
+}
+
+async function fetchScheduleFixtures(): Promise<SourceFixture[]> {
+  const response = await fetchWithRetry(SCHEDULE_URL, {
+    headers: { 'user-agent': USER_AGENT }
+  });
+
+  const html = await response.text();
+  const fixtures = extractFixturesFromHtml(html);
+  await sleep(REQUEST_DELAY_MS);
+  return fixtures;
+}
+
+export async function scrapeGamesSchedule(_maxPaginationClicks = 8): Promise<Game[]> {
+  await ensureAllowed(SCHEDULE_URL);
+
+  const fixtures = await fetchScheduleFixtures();
+  const threshold = Date.now() - 3 * 60 * 60 * 1000;
+
+  const deduped = new Map<string, Game>();
+  for (const fixture of fixtures) {
+    const game = normalizeFixture(fixture);
+    if (new Date(game.startTimeISO).getTime() < threshold) {
+      continue;
+    }
+    deduped.set(game.id, game);
+  }
+
+  return Array.from(deduped.values()).sort(
+    (a, b) => new Date(a.startTimeISO).getTime() - new Date(b.startTimeISO).getTime()
+  );
 }
 
 function defaultDescription(matchup: string): string {
   return `This page provides full broadcast information for ${matchup}. Here you can see the confirmed start time, TV channel listings, and live streaming options available for this event.`;
 }
 
+function fallbackMatchupFromUrl(url: string): string {
+  const tail = url.split('/').pop() || 'college-lacrosse-game';
+  const cleaned = tail.replace(/-\d+$/, '').replace(/-/g, ' ').trim();
+  return cleaned || 'College Lacrosse Game';
+}
+
+function buildGameDetailFromFixture(fixture: SourceFixture, detailUrl: string): GameDetail {
+  const matchup = buildMatchup(fixture);
+  const idFromUrl = detailUrl.split('/').pop() || `${fixture.fixture_id}`;
+
+  return {
+    gameId: safeGameId(idFromUrl),
+    matchup,
+    description: defaultDescription(matchup),
+    watchOptions: buildWatchOptions(fixture, detailUrl),
+    detailUrl,
+    scrapedAt: new Date().toISOString()
+  };
+}
+
 export async function scrapeGameDetail(detailUrl: string): Promise<GameDetail> {
   const absoluteUrl = toAbsoluteUrl(detailUrl, BASE_URL);
   await ensureAllowed(absoluteUrl);
 
-  const browser = await launchBrowser();
-
   try {
-    const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
-    await page.goto(absoluteUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await sleep(900);
+    const fixtureId = extractFixtureIdFromUrl(absoluteUrl);
+    const fixtures = await fetchScheduleFixtures();
+    const fixture = fixtureId ? fixtures.find((item) => item.fixture_id === fixtureId) : undefined;
 
-    const payload = await page.evaluate(() => {
-      const h1 = (document.querySelector('h1')?.textContent || '').replace(/\s+/g, ' ').trim();
-      const description =
-        (document.querySelector('meta[name="description"]') as HTMLMetaElement | null)?.content ||
-        (Array.from(document.querySelectorAll('p')).find((p) => (p.textContent || '').length > 100)?.textContent || '');
-
-      const links = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
-      const watchOptions: RawWatchOption[] = links
-        .filter((link) => /watch\s*it\s*live/i.test(link.textContent || '') || /\/go\//i.test(link.href))
-        .map((link) => {
-          const rowText =
-            (link.closest('li,article,div')?.textContent || link.textContent || '').replace(/\s+/g, ' ').trim();
-          return {
-            name: rowText || 'Streaming Platform',
-            url: link.href
-          };
-        });
-
-      return {
-        matchup: h1,
-        description: (description || '').replace(/\s+/g, ' ').trim(),
-        watchOptions
-      };
-    });
-
-    const detailId = safeGameId(absoluteUrl.split('/').pop() || payload.matchup);
-    const watchOptions = payload.watchOptions.map((option) => {
-      const platform = detectPlatform(option.name);
-      return {
-        name: platform.name,
-        slug: platform.slug,
-        logo: platform.logo,
-        affiliateUrl: extractAffiliateTarget(option.url)
-      };
-    });
-
-    const uniqueMap = new Map<string, StreamingPlatform>();
-    for (const option of watchOptions) {
-      uniqueMap.set(`${option.slug}:${option.affiliateUrl}`, option);
+    if (fixture) {
+      return buildGameDetailFromFixture(fixture, absoluteUrl);
     }
 
+    const fallbackMatchup = fallbackMatchupFromUrl(absoluteUrl);
     return {
-      gameId: detailId,
-      matchup: payload.matchup,
-      description: payload.description || defaultDescription(payload.matchup),
-      watchOptions: Array.from(uniqueMap.values()),
+      gameId: safeGameId(absoluteUrl.split('/').pop() || 'game-detail'),
+      matchup: fallbackMatchup,
+      description: defaultDescription(fallbackMatchup),
+      watchOptions: [],
       detailUrl: absoluteUrl,
       scrapedAt: new Date().toISOString()
     };
   } finally {
-    await browser.close();
     await sleep(REQUEST_DELAY_MS);
   }
 }
